@@ -1,5 +1,6 @@
 package com.github.hcsp;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
@@ -12,40 +13,77 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.io.IOException;
+import java.sql.*;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 public class Main {
-    public static void main(String[] args) throws IOException {
-
-        //待处理的链接池
-        List<String> linkPool = new ArrayList<>();
-        //已经处理的链接池
-        Set<String> processedLinks = new HashSet<>();
-        linkPool.add("https://sina.cn");
+    @SuppressFBWarnings("DMI_CONSTANT_DB_PASSWORD")
+    public static void main(String[] args) throws IOException, SQLException {
+        Connection conn = DriverManager.getConnection("jdbc:h2:file:/Users/sean/IdeaProjects/xiedaimala-crawler/news", "root", "123");
         while (true) {
+            // 待处理的链接池
+            // 从数据库加载即将处理的链接的代码
+            List<String> linkPool = loadUrlsFromDatabase(conn, "select LINK from LINKS_TO_BE_PROCESSED");
             if (linkPool.isEmpty()) {
                 break;
             }
-            // 从尾部删除更有效率
+            // 从待处理池子中捞一个来处理
+            // 处理完后从池子（包括数据库）中删除
             String link = linkPool.remove(linkPool.size() - 1);
-            if (processedLinks.contains(link)) {
+            insertLinkIntoDatabase(conn, link, "DELETE FROM LINKS_TO_BE_PROCESSED WHERE LINK=?");
+            // 询问数据库，当前链接是不是已经被处理过了？
+            if (!isLinkProcessed(conn, link)) {
                 continue;
             }
-//          if (link.contains("news.sina.cn") || "https://sina.cn".equals(link) && !link.contains("passport.sina.cn")) {
-            // 这是我们感兴趣的，我们只处理新浪站内的链接
             if (isInterestingLink(link)) {
                 Document doc = httpGetAndParseHtml(link);
-                doc.select("a").stream().map(aTag -> aTag.attr("href")).forEach(linkPool::add);
+                parseUrlsFromPageAndStoreIntoDatabase(conn, doc);
                 // 假如这是一个新闻的详情页面，就存入数据库，否则什么也不做
                 storeIntoDatabaseIfItIsNewsPage(doc);
-                processedLinks.add(link);
-            } else {
-                // 这是我们不感兴趣的，不处理它
+                insertLinkIntoDatabase(conn, link, "INSERT INTO LINKS_ALREADY_PROCESSED (LINK) VALUES (?)");
             }
         }
+    }
+
+    private static void parseUrlsFromPageAndStoreIntoDatabase(Connection conn, Document doc) throws SQLException {
+        for (Element aTag : doc.select("a")) {
+            String href = aTag.attr("href");
+            insertLinkIntoDatabase(conn, href, "INSERT INTO LINKS_TO_BE_PROCESSED (LINK) VALUES (?)");
+        }
+    }
+
+    private static boolean isLinkProcessed(Connection conn, String link) throws SQLException {
+        ResultSet resultSet = null;
+        try (PreparedStatement statement = conn.prepareStatement("SELECT LINK FROM LINKS_ALREADY_PROCESSED WHERE LINK=?")) {
+            statement.setString(1, link);
+            resultSet = statement.executeQuery();
+            while (resultSet.next()) {
+                return true;
+            }
+        } finally {
+            if (resultSet != null) {
+                resultSet.close();
+            }
+        }
+        return false;
+    }
+
+    private static void insertLinkIntoDatabase(Connection conn, String href, String sql) throws SQLException {
+        try (PreparedStatement statement = conn.prepareStatement(sql)) {
+            statement.setString(1, href);
+            statement.executeUpdate();
+        }
+    }
+
+    private static List<String> loadUrlsFromDatabase(Connection conn, String sql) throws SQLException {
+        List<String> results = new ArrayList<>();
+        try (PreparedStatement statement = conn.prepareStatement(sql); ResultSet resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                results.add(resultSet.getString(1));
+            }
+        }
+        return results;
     }
 
     private static void storeIntoDatabaseIfItIsNewsPage(Document doc) {
@@ -74,6 +112,7 @@ public class Main {
         }
     }
 
+    // 这是我们感兴趣的，我们只处理新浪站内的链接
     private static boolean isInterestingLink(String link) {
         return isNewsPage(link) || isIndexPage(link) && isNotLoginPage(link);
     }
