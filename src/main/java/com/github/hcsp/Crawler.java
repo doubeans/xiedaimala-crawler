@@ -15,32 +15,35 @@ import java.io.IOException;
 import java.sql.SQLException;
 import java.util.stream.Collectors;
 
-public class Crawler {
+public class Crawler extends Thread {
 
-    private CrawlerDao dao = new MyBatisCrawlerDao();
+    private CrawlerDao dao;
 
-    private void run() throws IOException, SQLException {
-
-        String link;
-        // 从数据库中加载下一个链接，如果能加载到，则进行循环
-        while ((link = dao.getNextLinkThenDelete()) != null) {
-            // 询问数据库，当前链接是不是已经被处理过了？
-            if (dao.isLinkProcessed(link)) {
-                continue;
-            }
-            if (isInterestingLink(link)) {
-                System.out.println(link);
-                Document doc = httpGetAndParseHtml(link);
-                parseUrlsFromPageAndStoreIntoDatabase(doc);
-                // 假如这是一个新闻的详情页面，就存入数据库，否则什么也不做
-                storeIntoDatabaseIfItIsNewsPage(doc, link);
-                dao.insertProcessedLink(link);
-            }
-        }
+    public Crawler(CrawlerDao dao) {
+        this.dao = dao;
     }
 
-    public static void main(String[] args) throws IOException, SQLException {
-        new Crawler().run();
+    public void run() {
+        try {
+            String link;
+            // 从数据库中加载下一个链接，如果能加载到，则进行循环
+            while ((link = dao.getNextLinkThenDelete()) != null) {
+                // 询问数据库，当前链接是不是已经被处理过了？
+                if (dao.isLinkProcessed(link)) {
+                    continue;
+                }
+                if (isInterestingLink(link)) {
+                    System.out.println(link);
+                    Document doc = httpGetAndParseHtml(link);
+                    parseUrlsFromPageAndStoreIntoDatabase(doc);
+                    // 假如这是一个新闻的详情页面，就存入数据库，否则什么也不做
+                    storeIntoDatabaseIfItIsNewsPage(doc, link);
+                    dao.insertProcessedLink(link);
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void parseUrlsFromPageAndStoreIntoDatabase(Document doc) throws SQLException {
