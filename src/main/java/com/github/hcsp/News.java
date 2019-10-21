@@ -7,6 +7,12 @@ public class News {
     private String title;
     private String content;
 
+    public News(String url, String title, String content) {
+        this.url = url;
+        this.title = title;
+        this.content = content;
+    }
+
     public Integer getId() {
         return id;
     }
