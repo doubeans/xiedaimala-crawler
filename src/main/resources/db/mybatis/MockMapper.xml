@@ -11,5 +11,6 @@
     <select id="selectNews" resultType="com.github.hcsp.News">
         select ID, URL, TITLE, CONTENT, CREATED_AT, MODIFIED_AT
         from NEWS
+        limit 2000
     </select>
 </mapper>
